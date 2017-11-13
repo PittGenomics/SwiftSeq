@@ -732,23 +732,29 @@ def compose_RgMergeSort(app_name, **kwargs):
         '# Will check if bam has data in it'
         '# if it does not the file will be ignored at the sorting step\n'
         'inBams=""\n'
+        'counter=0\n'
         'for file in $inBam;do\n'
         '\tif [ "$(head -1 $file)" == "no_mapped_reads" ]; then\n'
         '\t\techo $file: no_mapped_reads >> $logFile 2>&1\n'
         '\telse\n'
+        '\t\tcounter=$((counter+1))\n'
         '\t\tinBams=$inBams" "$file\n'
         '\tfi\n'
         'done\n\n'
         
-        'absDirName=$(dirname $logFile)\n'
+        'absDirName=$(dirname $logFile)\n\n'
         
-        '# Use Sambamba for sorting\n'
-        '{exe_sambamba} sort --nthreads={max_cores} --memory-limit={max_mem}M --tmpdir=$tmpDir $inBams 2>> '
-            '$logFile | {exe_bamutil} splitChromosome --in -.bam --out ${{absDirName}}/${{ID}}.contig. --noef 2>> '
-            '$logFile\n\n'
-        # '{exe_novosort} --threads {max_cores} --ram {max_mem}M --tmpcompression 6 --tmpdir $tmpDir $inBams 2>> '
-        #     '$logFile | {exe_bamutil} splitChromosome --in -.bam --out ${{absDirName}}/${{ID}}.contig. --noef 2>> '
-        #     '$logFile\n\n'
+        '# if a single bam samtools view if multiple sambamba merge\n'
+        '# Use Sambamba for merging. Sorting handled at previous steps\n'
+        'if [[ $counter -eq 1 ]]; then\n'
+        '\t{exe_samtools} view -b $inBams'
+            '| {exe_bamutil} splitChromosome --in -.bam --out ${{absDirName}}/${{ID}}.contig. --noef'
+            ' 2>> $logFile\n'
+        'else\n'
+        '\t{exe_sambamba} merge --nthreads={max_cores} /dev/stdout $inBams 2>> $logFile '
+            '| {exe_bamutil} splitChromosome --in -.bam --out ${{absDirName}}/${{ID}}.contig. --noef'
+            ' 2>> $logFile\n'
+        'fi\n\n'
         
         '# declare array\n'
         'declare -a outBams\n'
@@ -778,6 +784,7 @@ def compose_RgMergeSort(app_name, **kwargs):
             exe_sambamba=exe_config['sambamba'],
             # exe_novosort=exe_config['novosort'],
             exe_bamutil=exe_config['bamutil'],
+            exe_samtools=exe_config['samtools']
             **kwargs
         ),
         executable=True
@@ -826,13 +833,11 @@ def compose_ContigMergeSort(app_name, **kwargs):
         '\tfi\n'
         'done\n\n'
         
-        '# Use Novosort\n'
+        '# Use Sambamba merge. Contigs should already be sorted\n'
         'echo [$(date)] Sorting and indexing $inBams into $outBam >> $logFile 2>&1\n'
-        # '{exe_novosort} --threads {max_cores} --ram {max_mem}M --tmpcompression 6 --tmpdir $tmpDir --output $outBam '
-        #     '--index $inBams >> $logFile 2>&1\n\n'
-        '{exe_sambamba} sort --nthreads={max_cores} --memory-limit={max_mem}M --tmpdir=$tmpDir --out=$outBam '
-            '>> $logFile 2>&1\n'
-        '{exe_sambamba} index --nthreads={max_cores} $outBam\n\n'
+        '{exe_sambamba} merge --nthreads={max_cores} $outBam $inBams 2>> $logFile\n\n'
+
+        '{exe_samtools} index $outBam 2>> $logFile\n\n'
         
         '{eof_check}\n'
     )
@@ -844,6 +849,7 @@ def compose_ContigMergeSort(app_name, **kwargs):
             eof_check=eof_check('outBam'),
             # exe_novosort=exe_config['novosort'],
             exe_sambamba=exe_config['sambamba'],
+            exe_samtools=exe_config['samtools']
             **kwargs
         ),
         executable=True
@@ -1121,7 +1127,7 @@ def compose_BwaAln(app_name, **kwargs):
         #     '--ram {max_mem_div_2}M --tmpcompression 6 --tmpdir $tmpDir --output $outBam --index - 2>> $logFile\n\n'
         '\t{exe_bwa} sampe -P -r "$readGroup" {ref_ref} ${{ID}}_1.sai ${{ID}}_2.sai ${{ID}}_1.fastq ${{ID}}_2.fastq '
             '2>> $logFile | {exe_samtools} view -b - 2>> $logFile | {exe_sambamba} sort --nthreads={max_cores_div_4} '
-            '--memory-limit={max_mem_div_2}M --tmpdir=$tmpDir --out=$outBam - 2>> $logFile\n'
+            '--memory-limit={max_mem_div_2}M --tmpdir=$tmpDir --out=$outBam /dev/stdin 2>> $logFile\n'
         '\t{exe_sambamba} index --nthreads={max_cores_div_4} $outBam\n\n'
         
         'else\n'
@@ -1134,7 +1140,7 @@ def compose_BwaAln(app_name, **kwargs):
         #     '--tmpdir $tmpDir --output $outBam --index - 2>> $logFile\n\n'
         '\t{exe_bwa} samse -r $readGroup {ref_ref} ${{ID}}.sai ${{ID}}.fastq 2>> $logFile | {exe_samtools} view -b - '
             '2>> $logFile | {exe_sambamba} sort --nthreads={max_cores_div_4} --memory-limit={max_mem_div_2}M '
-            '--tmpdir=$tmpDir --out=$outBam - 2>> $logFile\n'
+            '--tmpdir=$tmpDir --out=$outBam /dev/stdin 2>> $logFile\n'
         '{exe_sambamba} index --nthreads={max_cores_div_4} $outBam\n\n'
         
         'fi\n\n'
@@ -1153,8 +1159,8 @@ def compose_BwaAln(app_name, **kwargs):
             # exe_novosort=exe_config['novosort'],
             exe_sambamba=exe_config['sambamba'],
             ref_ref=ref_config['ref'],
-            max_cores_div_4=kwargs.get('max_cores') / 4,
-            max_mem_div_2=kwargs.get('max_mem') / 2,
+            max_cores_div_4=int(kwargs.get('max_cores') / 4),
+            max_mem_div_2=int(kwargs.get('max_mem') / 2),
             **kwargs
         ),
         executable=True
@@ -1364,7 +1370,7 @@ def compose_BwaMem(app_name, **kwargs):
         #     '--tmpcompression 6 --tmpdir $tmpDir --output $outBam --index - 2>> $logFile\n\n'
         '\t{exe_bwa} mem {app_parameters} -M -t {max_cores} -R "$readGroup" {ref_ref} $fastq1 $fastq2 2>> $logFile | '
             '{exe_samtools} view -b - 2>> $logFile | {exe_sambamba} sort --nthreads={max_cores_div_4} '
-            '--memory-limit={max_mem_div_2}M --tmpdir=$tmpDir --out=$outBam - 2>> $logFile\n'
+            '--memory-limit={max_mem_div_2}M --tmpdir=$tmpDir --out=$outBam /dev/stdin 2>> $logFile\n'
         '\t{exe_sambamba} index --nthreads={max_cores_div_4} $outBam\n\n'
         
         '\t# remove fifo variables/objects\n'
@@ -1390,7 +1396,7 @@ def compose_BwaMem(app_name, **kwargs):
         #     '--tmpcompression 6 --tmpdir $tmpDir --output $outBam --index - 2>> $logFile\n\n'
         '\t{exe_bwa} mem {app_parameters} -M -t {max_cores} -R "$readGroup" {ref_ref} $fastq 2>> $logFile | '
             '{exe_samtools} view -b - 2>> $logFile | {exe_sambamba} sort --nthreads={max_cores_div_4} '
-            '--memory-limit={max_mem_div_2}M --tmpdir=$tmpDir --out=$outBam - 2>> $logFile\n'
+            '--memory-limit={max_mem_div_2}M --tmpdir=$tmpDir --out=$outBam /dev/stdin 2>> $logFile\n'
         '\t{exe_sambamba} index --nthreads={max_cores_div_4} $outBam\n\n'
         
         '\t# remove fifo variables/objects\n'
@@ -1412,8 +1418,8 @@ def compose_BwaMem(app_name, **kwargs):
             # exe_novosort=exe_config['novosort'],
             exe_sambamba=exe_config['sambamba'],
             ref_ref=ref_config['ref'],
-            max_cores_div_4=kwargs.get('max_cores') / 4,
-            max_mem_div_2=kwargs.get('max_mem') / 2,
+            max_cores_div_4=int(kwargs.get('max_cores') / 4),
+            max_mem_div_2=int(kwargs.get('max_mem') / 2),
             **kwargs
         ),
         executable=True

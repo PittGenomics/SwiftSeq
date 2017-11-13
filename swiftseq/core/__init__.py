@@ -48,7 +48,7 @@ class SwiftSeqStrings(object):
 
     # Strings for setuptools
     setup_name = 'SwiftSeq'
-    setup_version = '1.0.0'
+    setup_version = '1.0.1'
     setup_description = 'TODO'
     setup_license = 'TODO'
     setup_author = 'Jason Pitt'
@@ -266,11 +266,11 @@ class SwiftSeqApps(object):
         }
 
     _base = {
-        'GatkBqsrGrpReduce': {
-            'name': 'GatkBqsrGrpReduce',
-            'exclusion': None,
-
-                              'walltime': '03:00:00', 'pool': 'primary'},
+        # 'GatkBqsrGrpReduce': {
+        #     'name': 'GatkBqsrGrpReduce',
+        #     'exclusion': None,
+        #
+        #                       'walltime': '03:00:00', 'pool': 'primary'},
         'SamtoolsParseContig': {
             'name': 'SamtoolsParseContig',
             'exclusion': None,
